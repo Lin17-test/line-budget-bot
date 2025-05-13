@@ -1,0 +1,17 @@
+git add expenses.json
+git commit -m "Add default expenses.json for initial data"
+git push
+[
+  {
+    "item": "牛動飯",
+    "amount": 240.0,
+    "category": "三餐",
+    "month": "2025-05"
+  },
+  {
+    "item": "coco",
+    "amount": 60.0,
+    "category": "飲料",
+    "month": "2025-05"
+  }
+]
