@@ -105,7 +105,7 @@ def handle_message(event):
     elif text == "查詢":
         reply_text = "🔍 查詢功能尚未實作"
 
-       elif text.startswith("刪除 "):
+    elif text.startswith("刪除 "):
         try:
             item_to_delete = text.split(" ", 1)[1].strip()
             current_month = "2025-05"  # 或改成 datetime.now().strftime("%Y-%m")
