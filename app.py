@@ -105,6 +105,36 @@ def handle_message(event):
     elif text == "查詢":
         reply_text = "🔍 查詢功能尚未實作"
 
+       elif text.startswith("刪除 "):
+        try:
+            item_to_delete = text.split(" ", 1)[1].strip()
+            current_month = "2025-05"  # 或改成 datetime.now().strftime("%Y-%m")
+            
+            # 讀取資料
+            try:
+                with open("expenses.json", "r", encoding='utf-8') as f:
+                    data = json.load(f)
+                    if not isinstance(data, list):
+                        data = []
+            except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
+                data = []
+
+            # 找出最後一筆符合條件的項目
+            for i in range(len(data) - 1, -1, -1):
+                entry = data[i]
+                if entry.get("item") == item_to_delete and entry.get("month") == current_month:
+                    deleted_entry = data.pop(i)
+                    with open("expenses.json", "w", encoding='utf-8') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    reply_text = f"🗑️ 已刪除：{deleted_entry['item']} - {deleted_entry['amount']} 元 - {deleted_entry['category']}"
+                    break
+            else:
+                reply_text = f"⚠️ 找不到 {item_to_delete} 的記帳紀錄"
+
+        except Exception as e:
+            print(f"刪除錯誤: {e}")
+            reply_text = "❌ 刪除失敗，請稍後再試"
+
     else:
         reply_text = "🤖 指令錯誤，請輸入：記帳、總額 或 查詢"
 
