@@ -4,6 +4,7 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import psycopg2
 import os
+from datetime import datetime  # ← 加入這行
 
 app = Flask(__name__)
 
@@ -19,15 +20,20 @@ handler = WebhookHandler(channel_secret)
 
 # 資料庫連線函數
 def get_db_connection():
-    conn = psycopg2.connect(
-        dbname="lineuser",
-        user="lineuser_user",
-        password="YYHO3ULmmYUfNJeLqULHU0hCCUH6P2WO",
-        host="dpg-d0iqhc15pdvs739p5e1g-a.oregon-postgres.render.com",
-        port="5432",
-        sslmode="require"
-    )
-    return conn
+    try:
+        conn = psycopg2.connect(
+            dbname="lineuser",
+            user="lineuser_user",
+            password="YYHO3ULmmYUfNJeLqULHU0hCCUH6P2WO",
+            host="dpg-d0iqhc15pdvs739p5e1g-a.oregon-postgres.render.com",
+            port="5432",
+            sslmode="require"
+        )
+        print("資料庫連線成功！")
+        return conn
+    except Exception as e:
+        print(f"資料庫連線失敗: {e}")
+        raise
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -38,6 +44,7 @@ def callback():
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
+        print("Invalid signature error")
         abort(400)
     except Exception as e:
         print(f"Error in callback: {e}")
@@ -65,10 +72,13 @@ def handle_message(event):
             conn = get_db_connection()
             cur = conn.cursor()
             cur.execute("""
-                INSERT INTO expenses (user_id, description, amount, category)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO expenses (user_id, description, amount, category, expense_date)
+                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                RETURNING id
             """, (user_id, item, amount, category))
+            inserted_id = cur.fetchone()[0]
             conn.commit()
+            print(f"成功插入記錄，ID: {inserted_id}")
             cur.close()
             conn.close()
 
@@ -76,6 +86,7 @@ def handle_message(event):
 
         except ValueError as ve:
             reply_text = str(ve)
+            print(f"ValueError: {ve}")
         except Exception as e:
             print(f"Error while recording expense: {e}")
             reply_text = "❌ 記帳失敗，請稍後再試"
@@ -85,16 +96,23 @@ def handle_message(event):
             conn = get_db_connection()
             cur = conn.cursor()
             cur.execute("""
-                SELECT COALESCE(SUM(amount),0), COUNT(*)
+                SELECT COALESCE(SUM(amount), 0), COUNT(*)
                 FROM expenses
                 WHERE user_id = %s
-                  AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)
+                  AND DATE_TRUNC('month', expense_date AT TIME ZONE 'UTC') = DATE_TRUNC('month', CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
             """, (user_id,))
-            total, count = cur.fetchone()
+            result = cur.fetchone()
+            if result:
+                total, count = result
+                print(f"查詢結果 - 總額: {total}, 筆數: {count}, 查詢時間: {datetime.now()}")  # ✅ 修正
+            else:
+                print("查詢結果為空！")
+                total, count = 0, 0
             cur.close()
             conn.close()
 
-            reply_text = f"💰 本月總支出：{total:.0f} 元，共 {count} 筆"
+            current_month = datetime.now().strftime("%Y-%m")  # ✅ 自動取得當月
+            reply_text = f"💰 {current_month} 總支出：{total:.0f} 元，共 {count} 筆"
 
         except Exception as e:
             print(f"Error while calculating total: {e}")
@@ -105,13 +123,12 @@ def handle_message(event):
             item_to_delete = text.split(" ", 1)[1].strip()
             conn = get_db_connection()
             cur = conn.cursor()
-            # 刪除該用戶最近一筆該項目支出
             cur.execute("""
                 DELETE FROM expenses 
                 WHERE id = (
                     SELECT id FROM expenses 
                     WHERE user_id = %s AND description = %s
-                    ORDER BY created_at DESC
+                    ORDER BY expense_date DESC
                     LIMIT 1
                 )
             """, (user_id, item_to_delete))
