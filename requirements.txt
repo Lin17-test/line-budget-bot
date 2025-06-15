@@ -9,20 +9,12 @@ filetype==1.2.0
 gunicorn==23.0.0
 h11==0.16.0
 idna==3.10
-Kivy @ file:///C:/Users/SANNY/algebra-practice/Kivy-2.3.1-cp311-cp311-win_amd64.whl#sha256=002de19fef53955c48108758beea3092cf281326642d2e71eca1c443f4227cce
-kivy-deps.angle==0.4.0
-kivy-deps.glew==0.3.1
-Kivy-Garden==0.1.5
-kivy_deps.sdl2==0.8.0
 packaging==25.0
-pdfminer.six==20250327
-pdfplumber==0.11.6
-pillow==11.2.1
-pycparser==2.22
 Pygments==2.19.1
-pypdfium2==4.30.1
-pypiwin32==223
-pywin32==310
+pycparser==2.22
 requests==2.32.3
 urllib3==2.4.0
 uvicorn==0.34.3
+Flask==2.3.2
+line-bot-sdk==3.7.0
+supabase-py==2.0.0
