@@ -26,6 +26,15 @@ messaging_api = MessagingApi(line_bot_api)
 handler = WebhookHandler(channel_secret)
 supabase = create_client(supabase_url, supabase_key)
 
+def get_current_month_range_utc():
+    now = datetime.utcnow()
+    start = datetime(now.year, now.month, 1)
+    if now.month == 12:
+        end = datetime(now.year + 1, 1, 1) - timedelta(seconds=1)
+    else:
+        end = datetime(now.year, now.month + 1, 1) - timedelta(seconds=1)
+    return start.isoformat() + "Z", end.isoformat() + "Z"
+
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature', '')
@@ -77,26 +86,17 @@ def handle_message(event):
                 reply_text = f"✅ 已記帳：{item} - {amount} 元 - {category}"
 
         elif text == "總額":
-            now = datetime.utcnow()
-            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            end = (start.replace(month=start.month % 12 + 1) if start.month < 12 else start.replace(year=start.year+1, month=1)) - timedelta(microseconds=1)
-
-            result = supabase.table("expenses").select("amount").eq("user_id", user_id).gte("expense_date", start.isoformat(timespec='milliseconds') + "Z").lte("expense_date", end.isoformat(timespec='milliseconds') + "Z").execute()
-
+            start, end = get_current_month_range_utc()
+            result = supabase.table("expenses").select("amount").eq("user_id", user_id).gte("expense_date", start).lte("expense_date", end).execute()
             if result.error:
                 raise Exception(result.error)
-
             total = sum(entry["amount"] for entry in result.data or [])
             count = len(result.data or [])
-            reply_text = f"💰 {now.strftime('%Y-%m')} 總支出：{total:.0f} 元，共 {count} 筆"
+            reply_text = f"\U0001F4B0 {start[:7]} 總支出：{total:.0f} 元，共 {count} 筆"
 
         elif text == "月報":
-            now = datetime.utcnow()
-            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            end = (start.replace(month=start.month % 12 + 1) if start.month < 12 else start.replace(year=start.year+1, month=1)) - timedelta(microseconds=1)
-
-            result = supabase.table("expenses").select("*").gte("expense_date", start.isoformat(timespec='milliseconds') + "Z").lte("expense_date", end.isoformat(timespec='milliseconds') + "Z").execute()
-
+            start, end = get_current_month_range_utc()
+            result = supabase.table("expenses").select("*").eq("user_id", user_id).gte("expense_date", start).lte("expense_date", end).execute()
             if result.error:
                 raise Exception(result.error)
 
@@ -106,13 +106,13 @@ def handle_message(event):
                 category_summary.setdefault(cat, []).append((row["description"], row["amount"]))
 
             total = sum(row["amount"] for row in result.data)
-            reply_lines = [f"💰 {now.strftime('%Y-%m')} 月報表", "------------------------", f"- 總支出：{total:.0f} 元", f"- 總筆數：{len(result.data)} 筆", "", "📊 按類別統計："]
+            reply_lines = [f"\U0001F4B0 {start[:7]} 月報表", "------------------------", f"- 總支出：{total:.0f} 元", f"- 總筆數：{len(result.data)} 筆", "", "\U0001F4CA 按類別統計："]
             for cat, items in category_summary.items():
                 cat_total = sum(a for _, a in items)
                 reply_lines.append(f"- {cat}: {cat_total:.0f} 元（{len(items)} 筆）")
                 for desc, amt in items:
                     reply_lines.append(f"  - {desc}: {amt:.0f} 元")
-            reply_lines.append(f"\n⏰ 生成時間：{now.strftime('%Y-%m-%d %H:%M')} UTC")
+            reply_lines.append(f"\n⏰ 生成時間：{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC")
             reply_text = "\n".join(reply_lines)
 
         elif text.startswith("刪除 "):
@@ -122,7 +122,7 @@ def handle_message(event):
                 delete_result = supabase.table("expenses").delete().eq("id", result.data[0]["id"]).execute()
                 if delete_result.error:
                     raise Exception(delete_result.error)
-                reply_text = f"🗑️ 已刪除最近一筆「{item}」"
+                reply_text = f"\U0001F5D1️ 已刪除最近一筆「{item}」"
             else:
                 reply_text = f"⚠️ 找不到「{item}」的記帳紀錄"
 
