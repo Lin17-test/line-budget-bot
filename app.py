@@ -4,18 +4,20 @@ from linebot.v3.webhook import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 from linebot.v3.messaging import TextMessage
-import psycopg2
 import os
 from datetime import datetime
+from supabase import create_client
 
 app = Flask(__name__)
 
-# 從環境變數取得 LINE 憑證
+# 從環境變數取得 LINE 憑證和 Supabase 設定
 channel_access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 channel_secret = os.getenv("LINE_CHANNEL_SECRET", "")
+supabase_url = os.getenv("SUPABASE_URL", "")
+supabase_key = os.getenv("SUPABASE_KEY", "")
 
-if not channel_access_token or not channel_secret:
-    raise ValueError("LINE_CHANNEL_ACCESS_TOKEN 和 LINE_CHANNEL_SECRET 必須設置")
+if not channel_access_token or not channel_secret or not supabase_url or not supabase_key:
+    raise ValueError("環境變數必須設置，包括 LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET, SUPABASE_URL, SUPABASE_KEY")
 
 # 初始化 LINE Bot API 和 Webhook 處理器
 configuration = Configuration(access_token=channel_access_token)
@@ -23,22 +25,8 @@ line_bot_api = ApiClient(configuration=configuration)
 messaging_api = MessagingApi(line_bot_api)
 handler = WebhookHandler(channel_secret)
 
-# 資料庫連線函數
-def get_db_connection():
-    try:
-        conn = psycopg2.connect(
-            dbname="lineuser",
-            user="lineuser_user",
-            password="YYHO3ULmmYUfNJeLqULHU0hCCUH6P2WO",
-            host="dpg-d0iqhc15pdvs739p5e1g-a.oregon-postgres.render.com",
-            port="5432",
-            sslmode="require"
-        )
-        print("資料庫連線成功！")
-        return conn
-    except Exception as e:
-        print(f"資料庫連線失敗: {e}")
-        raise
+# 初始化 Supabase 客戶端
+supabase = create_client(supabase_url, supabase_key)
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -78,17 +66,14 @@ def handle_message(event):
             if amount <= 0:
                 raise ValueError("金額必須大於 0")
 
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("""
-                INSERT INTO expenses (user_id, description, amount, category, expense_date)
-                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
-                RETURNING id
-            """, (user_id, item, amount, category))
-            inserted_id = cur.fetchone()[0]
-            conn.commit()
-            cur.close()
-            conn.close()
+            # 記錄到 Supabase
+            data = supabase.table("expenses").insert({
+                "user_id": user_id,
+                "description": item,
+                "amount": amount,
+                "category": category,
+                "expense_date": datetime.utcnow().isoformat()
+            }).execute()
 
             reply_text = f"✅ 已記帳：{item} - {amount} 元 - {category}"
 
@@ -100,21 +85,13 @@ def handle_message(event):
 
     elif text == "總額":
         try:
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT COALESCE(SUM(amount), 0), COUNT(*)
-                FROM expenses
-                WHERE user_id = %s
-                  AND DATE_TRUNC('month', expense_date AT TIME ZONE 'UTC') = DATE_TRUNC('month', CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
-            """, (user_id,))
-            total, count = cur.fetchone()
-            cur.execute("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'UTC'")
-            current_time = cur.fetchone()[0]
-            cur.close()
-            conn.close()
-
             current_month = datetime.utcnow().strftime("%Y-%m")
+            data = supabase.table("expenses").select("amount").eq("user_id", user_id).gte(
+                "expense_date", f"{current_month}-01T00:00:00Z"
+            ).lte("expense_date", f"{current_month}-31T23:59:59Z").execute()
+            total = sum(entry["amount"] for entry in data.data) if data.data else 0
+            count = len(data.data)
+
             reply_text = f"💰 {current_month} 總支出：{total:.0f} 元，共 {count} 筆 (個人)"
 
         except Exception as e:
@@ -124,41 +101,29 @@ def handle_message(event):
     elif text == "月報":
         try:
             current_month = datetime.utcnow().strftime("%Y-%m")
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT COALESCE(SUM(amount), 0), COUNT(*)
-                FROM expenses
-                WHERE DATE_TRUNC('month', expense_date AT TIME ZONE 'UTC') = DATE_TRUNC('month', CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
-            """)
-            total, count = cur.fetchone()
-            cur.execute("""
-                SELECT category, COALESCE(SUM(amount), 0), COUNT(*)
-                FROM expenses
-                WHERE DATE_TRUNC('month', expense_date AT TIME ZONE 'UTC') = DATE_TRUNC('month', CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
-                GROUP BY category
-            """)
-            category_stats = cur.fetchall()
-            cur.execute("SELECT CURRENT_TIMESTAMP AT TIME ZONE 'UTC'")
-            current_time = cur.fetchone()[0]
+            data = supabase.table("expenses").select("*").gte(
+                "expense_date", f"{current_month}-01T00:00:00Z"
+            ).lte("expense_date", f"{current_month}-31T23:59:59Z").execute()
+            total = sum(entry["amount"] for entry in data.data) if data.data else 0
+            count = len(data.data)
+
+            # 按類別統計
+            category_stats = {}
+            for entry in data.data:
+                cat = entry["category"]
+                if cat not in category_stats:
+                    category_stats[cat] = {"total": 0, "count": 0, "items": []}
+                category_stats[cat]["total"] += entry["amount"]
+                category_stats[cat]["count"] += 1
+                category_stats[cat]["items"].append((entry["description"], entry["amount"]))
 
             report = f"💰 {current_month} 月度報表 💰\n------------------------\n- 總支出：{total:.0f} 元\n- 總筆數：{count} 筆\n\n📊 按類別統計：\n"
-            for cat, cat_total, cat_count in category_stats:
-                report += f"- {cat}: {cat_total:.0f} 元 ({cat_count} 筆)\n"
-                cur.execute("""
-                    SELECT description, amount
-                    FROM expenses
-                    WHERE category = %s
-                      AND DATE_TRUNC('month', expense_date AT TIME ZONE 'UTC') = DATE_TRUNC('month', CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
-                """, (cat,))
-                items = cur.fetchall()
-                for desc, amt in items:
+            for cat, stats in category_stats.items():
+                report += f"- {cat}: {stats['total']:.0f} 元 ({stats['count']} 筆)\n"
+                for desc, amt in stats["items"]:
                     report += f"  - {desc}: {amt:.0f} 元\n"
 
-            report += f"\n⏰ 報表生成時間：{current_time.strftime('%Y-%m-%d %H:%M')} CST"
-            cur.close()
-            conn.close()
-
+            report += f"\n⏰ 報表生成時間：{datetime.utcnow().strftime('%Y-%m-%d %H:%M')} CST"
             reply_text = report
 
         except Exception as e:
@@ -168,23 +133,9 @@ def handle_message(event):
     elif text.startswith("刪除 "):
         try:
             item_to_delete = text.split(" ", 1)[1].strip()
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("""
-                DELETE FROM expenses 
-                WHERE id = (
-                    SELECT id FROM expenses 
-                    WHERE user_id = %s AND description = %s
-                    ORDER BY expense_date DESC
-                    LIMIT 1
-                )
-            """, (user_id, item_to_delete))
-            deleted_count = cur.rowcount
-            conn.commit()
-            cur.close()
-            conn.close()
-
-            if deleted_count > 0:
+            data = supabase.table("expenses").select("id").eq("user_id", user_id).eq("description", item_to_delete).order("expense_date", desc=True).limit(1).execute()
+            if data.data:
+                supabase.table("expenses").delete().eq("id", data.data[0]["id"]).execute()
                 reply_text = f"🗑️ 已刪除最近一筆「{item_to_delete}」記錄"
             else:
                 reply_text = f"⚠️ 找不到「{item_to_delete}」的記帳紀錄"
