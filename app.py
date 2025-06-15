@@ -50,7 +50,7 @@ def handle_message(event):
     text = event.message.text.strip()
     print(f"User {user_id} said: {text}")
 
-    reply_text = "🤖 指令錯誤，請輸入：記帳、總額、月報 或 刪除"
+    reply_text = "� 指令錯誤，請輸入：記帳、總額、月報 或 刪除"
 
     if text == "記帳":
         reply_text = "請輸入格式：記帳 項目 金額 類別"
@@ -67,7 +67,7 @@ def handle_message(event):
                 raise ValueError("金額必須大於 0")
 
             # 記錄到 Supabase 的 'expenses' 表格
-            data_response = supabase.table("expenses").insert({ # 將結果儲存到 data_response
+            data_response = supabase.table("expenses").insert({
                 "user_id": user_id,
                 "description": item,
                 "amount": amount,
@@ -75,12 +75,18 @@ def handle_message(event):
                 "expense_date": datetime.utcnow().isoformat(timespec='milliseconds') + "Z"
             }).execute()
 
-            # 修正錯誤判斷邏輯：檢查 data_response 中是否有明確的錯誤訊息，並且確保 data_response.data 不為空
-            # Supabase 的執行結果會包含 data 和 error 兩個屬性
-            if data_response.error or not data_response.data: # 如果有錯誤訊息或者沒有回傳資料，則判斷為失敗
-                raise Exception(f"Supabase error: {data_response.error.get('message', 'Unknown error') if data_response.error else 'No data returned'}")
-
-            reply_text = f"✅ 已記帳：{item} - {amount} 元 - {category}"
+            # --- 除錯用的修改開始 ---
+            print(f"Supabase insert response: {data_response}") # 列印完整的 Supabase 回應
+            if data_response.error:
+                print(f"Supabase error details: {data_response.error}") # 如果有錯誤，印出錯誤細節
+                # 即使有錯誤，為了除錯目的，這裡暫時讓它回覆成功
+                reply_text = f"✅ 已記帳：{item} - {amount} 元 - {category} (注意: 偵測到 Supabase 回應有問題，但資料可能已寫入)"
+            elif not data_response.data:
+                print("Supabase insert data is empty, but no error reported.") # 如果資料為空，但沒有錯誤
+                reply_text = f"✅ 已記帳：{item} - {amount} 元 - {category} (注意: Supabase 回應資料為空，但資料可能已寫入)"
+            else:
+                reply_text = f"✅ 已記帳：{item} - {amount} 元 - {category}"
+            # --- 除錯用的修改結束 ---
 
         except ValueError as ve:
             reply_text = str(ve)
