@@ -35,7 +35,7 @@ supabase = create_client(supabase_url, supabase_key)
 def get_user_categories(user_id):
     """獲取用戶的自訂類別"""
     response = supabase.table("categories").select("category_name").eq("user_id", user_id).execute()
-    return [row["category_name"] for row in response.data] if response.data else ["三餐", "均三餐", "飲料", "均飲料", "加油","均加油","生活用品","掛號費"]
+    return [row["category_name"] for row in response.data] if response.data else ["三餐", "加油", "菜錢", "水果", "生活用品","雜支"]
 
 def add_user_category(user_id, category):
     """新增用戶自訂類別"""
@@ -67,7 +67,7 @@ def handle_message(event):
     text = event.message.text.strip()
     logger.info(f"User {user_id} sent: {text}")
 
-    reply_text = "🤖 請輸入：記帳、總額、月報、刪除、新增類別 或 總額 YYYY-MM、月報 YYYY-MM"
+    reply_text = "🤖 請輸入：記帳、總額、月報個人、月報總和、刪除、新增類別 或 總額 YYYY-MM、月報個人 YYYY-MM、月報總和 YYYY-MM"
 
     try:
         if text == "記帳":
@@ -142,7 +142,8 @@ def handle_message(event):
             else:
                 reply_text = f"💰 {target_date.format('YYYY-MM')} 無支出記錄"
 
-        elif text.startswith("月報"):
+        elif text.startswith("月報個人") or text.startswith("月報總和"):
+            is_personal = text.startswith("月報個人")
             parts = text.split()
             if len(parts) > 1:
                 try:
@@ -155,12 +156,16 @@ def handle_message(event):
             start_of_month = target_date.start_of('month')
             end_of_month = target_date.end_of('month')
 
-            data_response = supabase.table("expenses").select("*").gte(
+            query = supベース.table("expenses").select("*").gte(
                 "expense_date", start_of_month.to_iso8601_string()
-            ).lte("expense_date", end_of_month.to_iso8601_string()).execute()
+            ).lte("expense_date", end_of_month.to_iso8601_string())
+            if is_personal:
+                query = query.eq("user_id", user_id)
+
+            data_response = query.execute()
 
             if not data_response.data:
-                reply_text = f"💰 {target_date.format('YYYY-MM')} 無支出記錄 (全用戶)"
+                reply_text = f"💰 {target_date.format('YYYY-MM')} 無支出記錄 ({'個人' if is_personal else '全用戶'})"
             else:
                 total = sum(entry["amount"] for entry in data_response.data)
                 count = len(data_response.data)
@@ -171,14 +176,14 @@ def handle_message(event):
                         category_stats[cat] = {"total": 0, "count": 0, "items": []}
                     category_stats[cat]["total"] += entry["amount"]
                     category_stats[cat]["count"] += 1
-                    category_stats[cat]["items"].append((entry["description"], entry["amount"], entry["user_id"]))
+                    category_stats[cat]["items"].append((entry["description"], entry["amount"]))
 
                 month_str = target_date.format("YYYY-MM")
-                report = f"💰 {month_str} 月度報表（全用戶） 💰\n------------------------\n- 總支出：{total:.0f} 元\n- 總筆數：{count} 筆\n\n📊 按類別統計：\n"
+                report = f"💰 {month_str} {'個人' if is_personal else '全用戶'}月度報表 💰\n------------------------\n- 總支出：{total:.0f} 元\n- 總筆數：{count} 筆\n\n📊 按類別統計：\n"
                 for cat, stats in category_stats.items():
                     report += f"- {cat}: {stats['total']:.0f} 元 ({stats['count']} 筆)\n"
-                    for desc, amt, uid in stats["items"]:
-                        report += f"  - {desc}: {amt:.0f} 元 (用戶 {uid[:4]}...)\n"
+                    for desc, amt in stats["items"]:
+                        report += f"  - {desc}: {amt:.0f} 元\n"
                 report += f"\n⏰ 報表生成時間：{pendulum.now('UTC').format('YYYY-MM-DD HH:mm')} UTC"
                 reply_text = report
 
