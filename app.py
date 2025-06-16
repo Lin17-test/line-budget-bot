@@ -35,7 +35,7 @@ supabase = create_client(supabase_url, supabase_key)
 def get_user_categories(user_id):
     """獲取用戶的自訂類別"""
     response = supabase.table("categories").select("category_name").eq("user_id", user_id).execute()
-    return [row["category_name"] for row in response.data] if response.data else ["食物", "交通", "娛樂", "購物", "其他"]
+    return [row["category_name"] for row in response.data] if response.data else ["三餐", "均三餐", "飲料", "均飲料", "加油","均加油","生活用品","掛號費"]
 
 def add_user_category(user_id, category):
     """新增用戶自訂類別"""
