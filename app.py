@@ -33,9 +33,16 @@ handler = WebhookHandler(channel_secret)
 supabase = create_client(supabase_url, supabase_key)
 
 def get_user_categories(user_id):
-    """獲取用戶的自訂類別"""
-    response = supabase.table("categories").select("category_name").eq("user_id", user_id).execute()
-    return [row["category_name"] for row in response.data] if response.data else ["食物", "交通", "娛樂", "購物", "其他"]
+    """獲取用戶的自訂類別，並確保內建類別始終可用"""
+    default_categories = ["三餐", "加油", "掛號", "生活用品", "飲料","機車"]
+    try:
+        response = supabase.table("categories").select("category_name").eq("user_id", user_id).execute()
+        user_categories = [row["category_name"] for row in response.data] if response.data else []
+        # 合併自訂類別和內建類別，並去重
+        return list(set(user_categories + default_categories))
+    except Exception as e:
+        logger.error(f"Failed to fetch categories: {str(e)}")
+        return default_categories  # 若查詢失敗，返回內建類別
 
 def add_user_category(user_id, category):
     """新增用戶自訂類別"""
