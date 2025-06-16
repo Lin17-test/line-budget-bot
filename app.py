@@ -156,7 +156,7 @@ def handle_message(event):
             start_of_month = target_date.start_of('month')
             end_of_month = target_date.end_of('month')
 
-            query = supベース.table("expenses").select("*").gte(
+            query = supabase.table("expenses").select("*").gte(
                 "expense_date", start_of_month.to_iso8601_string()
             ).lte("expense_date", end_of_month.to_iso8601_string())
             if is_personal:
